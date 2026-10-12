@@ -1,0 +1,33 @@
+{
+  "name": "site-audit-cli",
+  "version": "1.0.0",
+  "description": "CLI that audits URLs: status, redirects, response time, TLS certificate and security headers, with HTML and JSON reports",
+  "main": "dist/index.js",
+  "bin": {
+    "site-audit": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx src/bin.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/bin.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/node-forge": "^1.3.14",
+    "node-forge": "^1.4.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  }
+}

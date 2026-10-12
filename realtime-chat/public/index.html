@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>realtime-chat</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <section id="login" class="login">
+    <form id="join-form" class="card">
+      <h1>realtime-chat</h1>
+      <p class="muted">Pick a nickname and a room. Anyone in the same room sees your messages instantly.</p>
+      <label>Nickname <input id="nick" required minlength="2" maxlength="24" autocomplete="nickname"></label>
+      <label>Room <input id="room" required maxlength="32" value="general" pattern="[a-z0-9][a-z0-9-]*"></label>
+      <button>Join</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="chat" class="chat" hidden>
+    <aside class="sidebar">
+      <div class="brand">realtime-chat</div>
+      <div class="section">Room</div>
+      <div id="room-name" class="room-name"></div>
+      <form id="switch-form" class="switch">
+        <input id="switch-room" placeholder="switch room" maxlength="32" aria-label="Switch room">
+      </form>
+      <div class="section">Online <span id="count"></span></div>
+      <ul id="members" class="members"></ul>
+      <div id="status" class="status">connecting</div>
+    </aside>
+    <main class="main">
+      <ol id="messages" class="messages" aria-live="polite"></ol>
+      <div id="typing" class="typing"></div>
+      <form id="send-form" class="composer">
+        <input id="text" placeholder="Write a message" maxlength="1000" autocomplete="off" aria-label="Message">
+        <button>Send</button>
+      </form>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  webhook-relay:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webhook-relay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webhook-relay/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Docker image and end-to-end delivery
+        run: |
+          set -eux
+          docker build -t webhook-relay:ci .
+          docker network create relay-net
+          docker run -d --name target --network relay-net node:22-bookworm-slim \
+            node -e 'require("http").createServer((q,s)=>{q.resume();q.on("end",()=>{console.log("got",q.headers["x-relay-event-id"]);s.end("ok")})}).listen(9000)'
+          docker run -d --name relay --network relay-net -p 8080:8080 \
+            -e ADMIN_TOKEN=ci-admin-token-0123456789 \
+            -e WEBHOOK_SOURCES='{"shop":{"secret":"ci-secret","target":"http://target:9000/hook"}}' \
+            webhook-relay:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          BODY='{"order":1}'
+          SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac ci-secret | awk '{print $2}')"
+          curl -fsS -X POST localhost:8080/webhooks/shop -H 'content-type: application/json' -H "x-signature: $SIG" -H 'x-event-id: evt_ci' -d "$BODY"
+          sleep 3
+          curl -fsS localhost:8080/admin/deliveries -H 'authorization: Bearer ci-admin-token-0123456789' | grep -q '"status":"delivered"'
+          docker logs target | grep -q 'got evt_ci'
+
+  jwt-auth-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jwt-auth-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jwt-auth-api/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Docker image and end-to-end auth flow
+        run: |
+          set -eux
+          docker build -t jwt-auth-api:ci .
+          docker run -d --name auth -p 8080:8080 \
+            -e JWT_SECRET=ci-secret-0123456789-0123456789-0123456789 -e ADMIN_EMAILS=admin@example.com \
+            jwt-auth-api:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS -X POST localhost:8080/auth/register -H 'content-type: application/json' \
+            -d '{"email":"admin@example.com","password":"correct horse battery","name":"Admin"}'
+          TOKENS=$(curl -fsS -X POST localhost:8080/auth/login -H 'content-type: application/json' \
+            -d '{"email":"admin@example.com","password":"correct horse battery"}')
+          ACCESS=$(echo "$TOKENS" | jq -r .accessToken)
+          REFRESH=$(echo "$TOKENS" | jq -r .refreshToken)
+          curl -fsS localhost:8080/me -H "authorization: Bearer $ACCESS" | grep -q '"role":"admin"'
+          curl -fsS localhost:8080/admin/users -H "authorization: Bearer $ACCESS" | grep -q admin@example.com
+          curl -fsS -X POST localhost:8080/auth/refresh -H 'content-type: application/json' \
+            -d "{\"refreshToken\":\"$REFRESH\"}" | grep -q accessToken
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8080/auth/refresh \
+            -H 'content-type: application/json' -d "{\"refreshToken\":\"$REFRESH\"}")" = 401
+          curl -fsS localhost:8080/docs/json | jq -e '.paths["/auth/login"]'
+
+  url-shortener:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: url-shortener
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: url-shortener/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Docker image and end-to-end redirect
+        run: |
+          set -eux
+          docker build -t url-shortener:ci .
+          docker run -d --name links -p 8080:8080 -e BASE_URL=http://localhost:8080 \
+            -e API_TOKEN=ci-token-0123456789 url-shortener:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS -X POST localhost:8080/api/links -H 'authorization: Bearer ci-token-0123456789' \
+            -H 'content-type: application/json' -d '{"url":"https://example.com/landing","alias":"ci-link"}'
+          curl -s -o /dev/null -D - localhost:8080/ci-link -H 'referer: https://www.linkedin.com/' | grep -qi '^location: https://example.com/landing'
+          curl -fsS localhost:8080/api/links/ci-link/stats | jq -e '.total == 1 and .referrers[0].host == "linkedin.com"'
+          curl -fsS localhost:8080/stats/ci-link | grep -q '<svg'
+
+  realtime-chat:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: realtime-chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: realtime-chat/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Docker image and end-to-end WebSocket message
+        run: |
+          set -eux
+          docker build -t realtime-chat:ci .
+          docker run -d --name chat -p 8080:8080 realtime-chat:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS localhost:8080/ | grep -q realtime-chat
+          node -e '
+            const ws = new WebSocket("ws://localhost:8080/ws");
+            const timer = setTimeout(() => { console.error("timeout"); process.exit(1); }, 5000);
+            ws.onopen = () => ws.send(JSON.stringify({ type: "join", room: "ci", nick: "runner" }));
+            ws.onmessage = (e) => {
+              const m = JSON.parse(e.data);
+              if (m.type === "joined") ws.send(JSON.stringify({ type: "message", text: "hello from CI" }));
+              if (m.type === "message" && m.text === "hello from CI") { clearTimeout(timer); ws.close(); }
+            };'
+
+  site-audit-cli:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site-audit-cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site-audit-cli/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Docker image and audit of a local server
+        run: |
+          set -eux
+          docker build -t site-audit:ci .
+          docker run --rm site-audit:ci --version
+          mkdir -p www out && echo '<h1>ok</h1>' > www/index.html
+          python3 -m http.server 8099 --directory www &
+          sleep 1
+          # A plain HTTP server without security headers must fail (exit code 1) and still write both reports.
+          code=0
+          docker run --rm --network host --user "$(id -u):$(id -g)" -v "$PWD/out:/work" \
+            site-audit:ci http://127.0.0.1:8099/ --out /work || code=$?
+          test "$code" = 1
+          jq -e '.summary.fail == 1 and .results[0].httpStatus == 200' out/report.json
+          grep -q 'Site audit report' out/report.html

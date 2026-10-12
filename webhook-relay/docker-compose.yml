@@ -1,0 +1,15 @@
+name: webhook-relay
+
+services:
+  relay:
+    build: .
+    image: webhook-relay:local
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - relay-data:/data
+    restart: unless-stopped
+
+volumes:
+  relay-data:
